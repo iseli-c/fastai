@@ -150,7 +150,7 @@ class ImageDataLoaders(DataLoaders):
         return cls.from_dblock(dblock, df, path=path, **kwargs)
 
     @classmethod
-    def from_df1(cls, path:PathOrStr, df:pd.DataFrame, folder:PathOrStr=None, label_delim:str=None, valid_pct:float=0.2,
+    def from_df1(cls, path, df:pd.DataFrame, folder, label_delim:str=None, valid_pct:float=0.2,
                 seed:int=None, fn_col:IntsOrStrs=0, label_col:IntsOrStrs=1, suffix:str='', **kwargs:Any)->'ImageDataBunch':
         "Create from a `DataFrame` `df`."
         src = (CustomImageList.from_df1(df, path=path, folder=folder, suffix=suffix, cols=fn_col)
