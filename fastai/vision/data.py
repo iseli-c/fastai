@@ -150,6 +150,14 @@ class ImageDataLoaders(DataLoaders):
         return cls.from_dblock(dblock, df, path=path, **kwargs)
 
     @classmethod
+    def from_df1(cls, path:PathOrStr, df:pd.DataFrame, folder:PathOrStr=None, label_delim:str=None, valid_pct:float=0.2,
+                seed:int=None, fn_col:IntsOrStrs=0, label_col:IntsOrStrs=1, suffix:str='', **kwargs:Any)->'ImageDataBunch':
+        "Create from a `DataFrame` `df`."
+        src = (CustomImageList.from_df1(df, path=path, folder=folder, suffix=suffix, cols=fn_col)
+                .split_by_rand_pct(valid_pct, seed)
+                .label_from_df(label_delim=label_delim, cols=label_col))
+        return cls.create_from_ll(src, **kwargs)
+    @classmethod
     def from_csv(cls, path, csv_fname='labels.csv', header='infer', delimiter=None, **kwargs):
         "Create from `path/csv_fname` using `fn_col` and `label_col`"
         df = pd.read_csv(Path(path)/csv_fname, header=header, delimiter=delimiter)
@@ -188,3 +196,85 @@ class SegmentationDataLoaders(DataLoaders):
                            batch_tfms=batch_tfms)
         res = cls.from_dblock(dblock, fnames, path=path, **kwargs)
         return res
+
+class CustomImageList(ItemList):
+    "`ItemList` suitable for computer vision."
+    _bunch,_square_show,_square_show_res = ImageDataBunch,True,True
+    def __init__(self, *args, convert_mode='RGB', after_open:Callable=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.convert_mode,self.after_open = convert_mode,after_open
+        self.copy_new.append('convert_mode')
+        self.c,self.sizes = 3,{}
+
+    def open(self,fn):
+          regex = re.compile(r'\d+')
+          fn = re.findall(regex,fn)
+          df = self.inner_df[self.inner_df.fn.values == int(fn[0])]
+          df_fn = df[df.fn.values == int(fn[0])]
+          img_pixel = df_fn['img'].values
+          return vision.Image(pil2tensor(img_pixel[0],np.float32).div_(255))
+
+    def get(self, i):
+        fn = super().get(i)
+        res = self.open(fn)
+        self.sizes[i] = res.size
+        return res
+    
+    @classmethod
+    def from_folder(cls, path:PathOrStr='.', extensions:Collection[str]=None, **kwargs)->ItemList:
+        "Get the list of files in `path` that have an image suffix. `recurse` determines if we search subfolders."
+        extensions = ifnone(extensions, image_extensions)
+        return super().from_folder(path=path, extensions=extensions, **kwargs)
+
+    @classmethod
+    def from_df(cls, df:DataFrame, path:PathOrStr, cols:IntsOrStrs=0, folder:PathOrStr=None, suffix:str='', **kwargs)->'ItemList':
+        "Get the filenames in `cols` of `df` with `folder` in front of them, `suffix` at the end."
+        suffix = suffix or ''
+        res = super().from_df(df, path=path, cols=cols, **kwargs)
+        pref = f'{res.path}{os.path.sep}'
+        if folder is not None: pref += f'{folder}{os.path.sep}'
+        res.items = np.char.add(np.char.add(pref, res.items.astype(str)), suffix)
+        return res
+
+    @classmethod
+    def from_df1(cls, df:DataFrame, path:PathOrStr, cols:IntsOrStrs=0, folder:PathOrStr=None, suffix:str='', **kwargs)->'ItemList':
+        "Get the filenames in `cols` of `df` with `folder` in front of them, `suffix` at the end."
+        suffix = suffix or ''
+        res = super().from_df1(df, path=path, cols=cols, **kwargs)
+        pref = f'{res.path}{os.path.sep}'
+        if folder is not None: pref += f'{folder}{os.path.sep}'
+        res.items = np.char.add(np.char.add(pref, res.items.astype(str)), suffix)
+        return res
+
+    @classmethod
+    def from_csv(cls, path:PathOrStr, csv_name:str, header:str='infer', **kwargs)->'ItemList':
+        "Get the filenames in `path/csv_name` opened with `header`."
+        path = Path(path)
+        df = pd.read_csv(path/csv_name, header=header)
+        return cls.from_df(df, path=path, **kwargs)
+
+    def reconstruct(self, t:Tensor): return Image(t.float().clamp(min=0,max=1))
+
+    def show_xys(self, xs, ys, imgsize:int=4, figsize:Optional[Tuple[int,int]]=None, **kwargs):
+        "Show the `xs` (inputs) and `ys` (targets) on a figure of `figsize`."
+        rows = int(np.ceil(math.sqrt(len(xs))))
+        axs = subplots(rows, rows, imgsize=imgsize, figsize=figsize)
+        for x,y,ax in zip(xs, ys, axs.flatten()): x.show(ax=ax, y=y, **kwargs)
+        for ax in axs.flatten()[len(xs):]: ax.axis('off')
+        plt.tight_layout()
+
+    def show_xyzs(self, xs, ys, zs, imgsize:int=4, figsize:Optional[Tuple[int,int]]=None, **kwargs):
+        "Show `xs` (inputs), `ys` (targets) and `zs` (predictions) on a figure of `figsize`."
+        if self._square_show_res:
+            title = 'Ground truth\nPredictions'
+            rows = int(np.ceil(math.sqrt(len(xs))))
+            axs = subplots(rows, rows, imgsize=imgsize, figsize=figsize, title=title, weight='bold', size=12)
+            for x,y,z,ax in zip(xs,ys,zs,axs.flatten()): x.show(ax=ax, title=f'{str(y)}\n{str(z)}', **kwargs)
+            for ax in axs.flatten()[len(xs):]: ax.axis('off')
+        else:
+            title = 'Ground truth/Predictions'
+            axs = subplots(len(xs), 2, imgsize=imgsize, figsize=figsize, title=title, weight='bold', size=14)
+            for i,(x,y,z) in enumerate(zip(xs,ys,zs)):
+                x.show(ax=axs[i,0], y=y, **kwargs)
+                x.show(ax=axs[i,1], y=z, **kwargs)            
+		
